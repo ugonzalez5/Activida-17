@@ -1,0 +1,213 @@
+@page "/"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using System.ComponentModel.DataAnnotations
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Control de estudiantes</PageTitle>
+
+<div class="page-shell">
+    <header class="topbar">
+        <div class="brand-mark">A</div>
+        <div><span class="eyebrow">GESTIÓN ACADÉMICA</span><h1>Control de estudiantes</h1></div>
+        <span class="status-pill"><span></span> SQL Server</span>
+    </header>
+
+    <main>
+        <section class="intro">
+            <div><p class="eyebrow">PANEL PRINCIPAL</p><h2>Administración de estudiantes</h2><p>Registra, consulta, actualiza y elimina estudiantes.</p></div>
+            <div class="summary-card"><span class="summary-icon">♙</span><div><strong>@estudiantes.Count</strong><small>Estudiantes registrados</small></div></div>
+        </section>
+
+        @if (!string.IsNullOrWhiteSpace(mensaje))
+        {
+            <div class="notice">@mensaje</div>
+        }
+
+        <section class="card form-card">
+            <div class="section-heading">
+                <div class="heading-icon">@(editando ? "✎" : "＋")</div>
+                <div><h3>@(editando ? "Editar estudiante" : "Nuevo estudiante")</h3><p>Completa los datos del formulario.</p></div>
+            </div>
+            <EditForm Model="formulario" OnValidSubmit="GuardarAsync">
+                <DataAnnotationsValidator />
+                <div class="validation-summary"><ValidationSummary /></div>
+                <div class="form-grid">
+                    <div class="field"><label for="nombre">Nombre completo</label><InputText id="nombre" @bind-Value="formulario.Nombre" placeholder="Ej. Ana López" /><ValidationMessage For="() => formulario.Nombre" /></div>
+                    <div class="field"><label for="correo">Correo electrónico</label><InputText id="correo" @bind-Value="formulario.Correo" placeholder="nombre@correo.com" /><ValidationMessage For="() => formulario.Correo" /></div>
+                    <div class="field"><label for="calificacion">Calificación</label><InputNumber id="calificacion" @bind-Value="formulario.Calificacion" min="0" max="10" step="0.1" placeholder="0.0 - 10.0" /><ValidationMessage For="() => formulario.Calificacion" /></div>
+                </div>
+                <div class="form-footer">
+                    <span>Todos los campos son obligatorios.</span>
+                    <div class="button-group">
+                        @if (editando)
+                        {
+                            <button class="secondary-button" type="button" @onclick="CancelarEdicion">Cancelar</button>
+                        }
+                        <button class="primary-button" type="submit" disabled="@cargando">@(editando ? "Guardar cambios" : "＋  Guardar estudiante")</button>
+                    </div>
+                </div>
+            </EditForm>
+        </section>
+
+        <section class="card list-card">
+            <div class="list-header">
+                <div class="section-heading"><div class="heading-icon blue">▤</div><div><h3>Estudiantes registrados</h3><p>Información consultada desde SQL Server.</p></div></div>
+                <span class="count-pill">@estudiantes.Count registros</span>
+            </div>
+            @if (cargando)
+            {
+                <div class="empty-state">Cargando información...</div>
+            }
+            else if (estudiantes.Count == 0)
+            {
+                <div class="empty-state"><div class="empty-icon">♙</div><strong>Aún no hay estudiantes</strong><span>Agrega el primer registro con el formulario superior.</span></div>
+            }
+            else
+            {
+                <div class="table-wrap"><table>
+                    <thead><tr><th>ESTUDIANTE</th><th>CORREO</th><th>CALIFICACIÓN</th><th class="actions-col">ACCIONES</th></tr></thead>
+                    <tbody>
+                    @foreach (var estudiante in estudiantes)
+                    {
+                        <tr>
+                            <td><div class="student-cell"><span class="avatar">@Iniciales(estudiante.Nombre)</span><strong>@estudiante.Nombre</strong></div></td>
+                            <td class="muted">@estudiante.Correo</td>
+                            <td><span class="grade">@estudiante.Calificacion.ToString("0.0")</span></td>
+                            <td class="actions-col">
+                                <button class="edit-button" title="Editar" aria-label="Editar a @estudiante.Nombre" @onclick="() => PrepararEdicion(estudiante)">Editar</button>
+                                <button class="delete-button" title="Eliminar estudiante" aria-label="Eliminar a @estudiante.Nombre" @onclick="() => EliminarAsync(estudiante.Id)">Eliminar</button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table></div>
+            }
+        </section>
+        <footer>Actividad 17 · Entity Framework Core · SQL Server</footer>
+    </main>
+</div>
+
+@code {
+    private List<Estudiante> estudiantes = [];
+    private FormularioEstudiante formulario = new();
+    private int? idEnEdicion;
+    private bool cargando = true;
+    private bool editando => idEnEdicion.HasValue;
+    private string mensaje = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await CargarAsync();
+
+    private async Task CargarAsync()
+    {
+        cargando = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        estudiantes = await db.Estudiantes.AsNoTracking().OrderBy(e => e.Nombre).ToListAsync();
+        cargando = false;
+    }
+
+    private async Task GuardarAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var correo = formulario.Correo.Trim();
+
+        var correoExiste = await db.Estudiantes.AnyAsync(e =>
+            e.Correo == correo && e.Id != (idEnEdicion ?? 0));
+
+        if (correoExiste)
+        {
+            mensaje = "Ya existe un estudiante registrado con ese correo.";
+            return;
+        }
+
+        if (idEnEdicion.HasValue)
+        {
+            var estudiante = await db.Estudiantes.FindAsync(idEnEdicion.Value);
+            if (estudiante is null)
+            {
+                mensaje = "No se encontró el estudiante que intentas actualizar.";
+                await CargarAsync();
+                return;
+            }
+
+            estudiante.Nombre = formulario.Nombre.Trim();
+            estudiante.Correo = correo;
+            estudiante.Calificacion = formulario.Calificacion;
+            mensaje = "Estudiante actualizado correctamente.";
+        }
+        else
+        {
+            db.Estudiantes.Add(new Estudiante
+            {
+                Nombre = formulario.Nombre.Trim(),
+                Correo = correo,
+                Calificacion = formulario.Calificacion
+            });
+            mensaje = "Estudiante registrado correctamente.";
+        }
+
+        try
+        {
+            await db.SaveChangesAsync();
+            LimpiarFormulario();
+            await CargarAsync();
+        }
+        catch (DbUpdateException)
+        {
+            mensaje = "No se pudo guardar. Verifica que el correo no esté duplicado y que la base de datos esté disponible.";
+        }
+    }
+
+    private void PrepararEdicion(Estudiante estudiante)
+    {
+        idEnEdicion = estudiante.Id;
+        formulario = new FormularioEstudiante
+        {
+            Nombre = estudiante.Nombre,
+            Correo = estudiante.Correo,
+            Calificacion = estudiante.Calificacion
+        };
+        mensaje = string.Empty;
+    }
+
+    private async Task EliminarAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var estudiante = await db.Estudiantes.FindAsync(id);
+        if (estudiante is not null)
+        {
+            db.Estudiantes.Remove(estudiante);
+            await db.SaveChangesAsync();
+            mensaje = "Estudiante eliminado correctamente.";
+            if (idEnEdicion == id) LimpiarFormulario();
+            await CargarAsync();
+        }
+    }
+
+    private void CancelarEdicion() => LimpiarFormulario();
+
+    private void LimpiarFormulario()
+    {
+        formulario = new FormularioEstudiante();
+        idEnEdicion = null;
+    }
+
+    private static string Iniciales(string nombre) =>
+        string.Join("", nombre.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2).Select(p => char.ToUpperInvariant(p[0])));
+
+    private sealed class FormularioEstudiante
+    {
+        [Required(ErrorMessage = "El nombre es obligatorio.")]
+        [StringLength(120)]
+        public string Nombre { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "El correo es obligatorio.")]
+        [EmailAddress(ErrorMessage = "Escribe un correo válido.")]
+        [StringLength(160)]
+        public string Correo { get; set; } = string.Empty;
+
+        [Range(typeof(decimal), "0", "10", ErrorMessage = "La calificación debe estar entre 0 y 10.")]
+        public decimal Calificacion { get; set; }
+    }
+}
